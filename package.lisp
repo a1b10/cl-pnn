@@ -1,4 +1,5 @@
 ;;;; package.lisp
 
 (defpackage #:cl-pnn
-  (:use #:cl))
+  (:use #:cl)
+  (:export #:pnn))

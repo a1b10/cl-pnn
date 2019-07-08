@@ -1,7 +1,7 @@
 # cl-pnn
 ### _Gwang-Jin Kim_
 
-This is a project to do ... something.
+Probabilistic Neural Networks using common lisp.
 
 ## License
 
