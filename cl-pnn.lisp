@@ -503,3 +503,36 @@ class PNN:
 ;;        (VALUES 41 42 43)
 ;;   (MULTI-ASSIGN (*A* *B* *C*) (#:G754 #:G755 #:G756))), T
 (multi-bind (*a* *b* *c*) (values 41 42 43)) ;; works!!!
+
+
+;; well, the working version of multi-assign had a 'progn' which is implicit inside multiple-value-bind.
+;; let's get rid of it!
+;; (defmacro multi-assign (vars values)
+;;   `(progn ,@(loop for g in vars
+;; 		  for v in values
+;; 		  collect `(defparameter ,g ,v))))
+
+;; let's think very flat
+
+(defmacro multi-bind (global-vars multi-value-expression)
+  (let ((inner-vars (loop for x in `,global-vars collect (gensym))))
+     `(multiple-value-bind ,inner-vars ,multi-value-expression
+	,@(loop for g in `,global-vars
+		for v in `,inner-vars
+		collect `(defparameter ,g ,v)))))
+
+(macroexpand-1 '(multi-bind (*a* *b* *c*) (values 41 42 43)))
+;; => (MULTIPLE-VALUE-BIND (#:G761 #:G762 #:G763)
+;;        (VALUES 41 42 43)
+;;      (DEFPARAMETER *A* #:G761)
+;;      (DEFPARAMETER *B* #:G762)
+;;      (DEFPARAMETER *C* #:G763)), T
+(macroexpand-1 '(multi-bind (*a* *b* *c* *d* *e*) (values 41 42 43 44 45)))
+;; => (MULTIPLE-VALUE-BIND (#:G764 #:G765 #:G766 #:G767 #:G768)
+;;        (VALUES 41 42 43 44 45)
+;;      (DEFPARAMETER *A* #:G764)
+;;      (DEFPARAMETER *B* #:G765)
+;;      (DEFPARAMETER *C* #:G766)
+;;      (DEFPARAMETER *D* #:G767)
+;;      (DEFPARAMETER *E* #:G768)), T   ;; yes, that looks very correct!
+(multi-bind (*a* *b* *c* *d* *e*) (values 41 42 43 44 45)) ;; works!
