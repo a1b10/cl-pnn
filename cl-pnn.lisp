@@ -2,75 +2,10 @@
 
 (in-package #:cl-pnn)
 
-#|
-
-import math
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-
-
-class PNN:
-    """
-    This follows R's pnn package! Tested!
-    """
-    def __init__(self, x_data = None, y_data = None):
-        if not type(x_data) == pd.core.frame.DataFrame \
-           and not type(y_data) == pd.core.frame.DataFrame:
-            self.N_features = 0
-            self.N_samples  = 0
-            self.classes    = []
-        else:
-            self.N_features = x_data.shape[1]
-            self.N_samples  = x_data.shape[0]
-            self.classes = self.unique(str(x) for x in y_data)
-        self.x_data = x_data   # either data itself or pointer to data
-        self.y_data = y_data
-    
-    def unique(self, seq):
-        seen = set()
-        seen_add = seen.add
-        return [x for x in seq if not (x in seen or seen_add(x))]
-    
-    def diff_square_sum(self, x, w_j):
-        """With x and w_j being np.arrays."""
-        return sum(diff ** 2 for diff in x - w_j)
-    
-    def gaussian_prbdf(self, x, w_j, sigma): # prbdf = probability density function
-        """With x and w_j being np.arrays."""
-        return math.exp( -(self.diff_square_sum(x, w_j)) / (2 * sigma ** 2))
-    
-    def gaussian_prbdf_group(self, x_df, w_j, sigma):
-        """With x_df being a data frame of x values,
-        with w_j being np.array."""
-        m, p = x_df.shape
-        return 1 / m * 1 / ((2 * np.pi) ** (p/2) * (sigma ** p))  * sum([self.gaussian_prbdf(row, w_j, sigma) \
-            for row in [x_df.iloc[x, :] for x in range(x_df.shape[0])]])
-    
-    def predict_probs_single(self, x, sigma):
-        df_list = self.x_data.groupby(self.y_data)
-        probs = [(name, self.gaussian_prbdf_group(df, x, sigma)) for name, df in df_list ]
-        total = sum([x[1] for x in probs])
-        probs = [(name, x/total) for name, x in probs]
-        sorted_probs = sorted( probs, key=lambda x: -x[1]) # decreasing sort by values
-        return sorted_probs
-    
-    def predict_single(self, x, sigma, value = False):
-        sorted_probs = self.predict_probs_single(x, sigma)
-        return sorted_probs[0][0] if not value else sorted_probs[0][1]
-
-|#
-
 (ql:quickload :computable-reals)
 (use-package :computable-reals)
 (setq *PRINT-PREC* 50)
 (defconstant +e+ (exp-r 1))
-
-;; (defun unique (l &optional (acc '()))
-;;   "Return unique list."
-;;   (cond ((null l) (nreverse acc))
-;; 	((member (car l) acc) (unique (cdr l) acc))
-;; 	(t (unique (cdr l) (cons (car l) acc)))))
 
 (defun unique (l &key (test #'string=))
   "Return unique list."
@@ -98,11 +33,6 @@ class PNN:
 	  contains-header-p
 	  contains-row-names-p))
 
-#|
-        m, p = x_df.shape
-        return 1 / m * 1 / ((2 * np.pi) ** (p/2) * (sigma ** p))  * sum([self.gaussian_prbdf(row, w_j, sigma) \
-            for row in [x_df.iloc[x, :] for x in range(x_df.shape[0])]])
-|#
 (defun gaussian-probability-density-function-matrix (l1 x-train sigma)
   "Return probability value for a sample and matrix of train values."
   (multiple-value-bind (m p) (dim x-train)
@@ -110,16 +40,6 @@ class PNN:
       (/r 1 (*r expression
 		(mapcar #'(lambda (l2) (gaussian-probability-density-function l1 l2 sigma))
 			x-train))))))
-
-#|
-    def predict_probs_single(self, x, sigma):
-        df_list = self.x_data.groupby(self.y_data)
-        probs = [(name, self.gaussian_prbdf_group(df, x, sigma)) for name, df in df_list ]
-        total = sum([x[1] for x in probs])
-        probs = [(name, x/total) for name, x in probs]
-        sorted_probs = sorted( probs, key=lambda x: -x[1]) # decreasing sort by values
-        return sorted_probs
-|#
 
 (defun predict-single-probe-probabilities (x x-train y sigma)
   "Return probabilities for a single probe given train data."
@@ -162,13 +82,8 @@ class PNN:
     (loop for i from 0 to (length labels)
 	  for pos in positions
 	  do (setf (elt result pos) (cons i (elt result pos))))
-    (values result levels)))
-#|
-    def predict_single(self, x, sigma, value = False):
-        sorted_probs = self.predict_probs_single(x, sigma)
-        return sorted_probs[0][0] if not value else sorted_probs[0][1]
-
-|#
+    (values (mapcar (lambda (x) (nreverse x)) result)
+	    levels)))
 
 (defun predict-single (sample x-train y sigma &optional (valuep nil))
   "Return class or probabilities of sample when running over x-train as PNN."
@@ -193,7 +108,6 @@ class PNN:
 	 (name (car row)))
     (values counts name)))
 
-
 (defun extract-column-by-position (lol idx)
   "Return content of column in lol by idx position."
   (mapcar (lambda (l) (elt l idx)) lol))
@@ -205,10 +119,16 @@ class PNN:
 	 (col-idx  (position col-name colnames :test #'string=)))
     (extract-column-by-position (cdr matrix) (1+ col-idx))))
 
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; label conversions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun replace-na (l &key (by "other"))
   "Return l with \"NA\" by 'by' value."
   (substitute by "NA" l :test #'string=)) ;; works!
-
 
 (defun categorical-to-nums (l &key (levels nil) (alphabetical-p t))
   "Return categories by numbers - if levels not given by unique categories."
@@ -233,11 +153,6 @@ class PNN:
 					 l))))
       (values one-hot-list categories))))
 
-(defun arg-max (one-hot-list)
-  "Return positions of 1 in one-hot-list."
-  (mapcar (lambda (l) (position 1 l)) one-hot-list))
-
-
 (defun one-hot-to-categories (one-hot-list categories)
   "Return categories from one-hot-encoded list."
   (labels ((choose (one-hot-row category-list)
@@ -246,6 +161,10 @@ class PNN:
 		   (t (choose (cdr one-hot-row) (cdr category-list))))))
     (mapcar (lambda (l) (choose l categories))
 	    one-hot-list)))
+
+(defun arg-max (one-hot-list)
+  "Return positions of 1 in one-hot-list."
+  (mapcar (lambda (l) (position 1 l)) one-hot-list))
 
 (multiple-value-bind (one-hot categories) (categorical-to-one-hot (replace-na *labels*))
   (one-hot-to-categories one-hot categories)) ;; works!
@@ -304,7 +223,7 @@ class PNN:
   (defparameter *train-indexes* list-of-indexes)
   (defparameter *categories* categories))
 
-(defparameter *test* (extract-rows-by-index (cdr *data*) (elt *train-indexes* 0)))
+(defparameter *test* (extract-rows-by-index (cdr *data*) (elt *train-indexes* 0))) ;; yes it extracts rows by a given index!
 
 
 
@@ -515,7 +434,7 @@ class PNN:
 ;; let's think very flat
 
 (defmacro multi-bind (global-vars multi-value-expression)
-  (let ((inner-vars (loop for x in `,global-vars collect (gensym))))
+  (let ((inner-vars (loop for _ in `,global-vars collect (gensym))))
      `(multiple-value-bind ,inner-vars ,multi-value-expression
 	,@(loop for g in `,global-vars
 		for v in `,inner-vars
@@ -536,3 +455,109 @@ class PNN:
 ;;      (DEFPARAMETER *D* #:G767)
 ;;      (DEFPARAMETER *E* #:G768)), T   ;; yes, that looks very correct!
 (multi-bind (*a* *b* *c* *d* *e*) (values 41 42 43 44 45)) ;; works!
+
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; improved train test split
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defparameter *random-state* (make-random-state t))
+
+(defun integer-like-p (n)
+  "Return t if modulo rest is zero else nil."
+  (multiple-value-bind (divider modulo) (floor n)
+    (zerop modulo)))
+
+(defun divisor-zero-p (n)
+  "Return t if divider is zero othervise nil."
+  (zerop (floor n)))
+
+(defun nshuffle (sequence &key (random-state *random-state*))
+  (loop for i from (length sequence) downto 2
+        do (rotatef (elt sequence (random i *random-state*))
+                    (elt sequence (1- i))))
+  sequence) ;; rosettac code 
+
+(defun split (list count)
+  "split list by position count (count is length of first list)."
+  (values (subseq list 0 count) (subseq list count)))
+
+(defun split-list (list count)
+  "Return lol with inner list being split by psoition count."
+  (multiple-value-list (split list count)))
+
+(defun train-test-index-split (l &key (test-size 0.3) (random-state *random-state*))
+  "Return indexes split given list by ratio test-size."
+  (let* ((length (length l))
+         (ratio-full-number (* test-size length))
+	 (indexes (loop for i from 0 below length
+			collect i)))
+    (if (or (> 1 ratio-full-number) (not (integer-like-p ratio-full-number)))
+      (setf ratio-full-number (floor ratio-full-number))
+      (format t "Not even divider. Using next lower number:~A" ratio-full-number))
+    (let ((indexes (nshuffle indexes :random-state random-state))
+	  (train-number (- length ratio-full-number)))
+      (split-list indexes train-number)))) ;; works
+
+(defun train-test-split (l &key (test-size 0.3) (random-state *random-state*))
+  "Return lol split given list of list by ratio test-size."
+  (let ((split-indexes (train-test-index-split l :test-size test-size :random-state random-state)))
+    (flet ((select (idxs) (mapcar (lambda (i) (elt l i)) idxs)))
+      (list (select (elt split-indexes 0)) (select (elt split-indexes 1))))))
+
+;; (defparameter *l* '(a b c d e f g h i j k l m))
+;; (length *l*)
+;; (* 0.3 13) ;; 3.9
+;; (loop for i from 0 to 13 collect i)
+;; (floor 3.9) ;; 3
+;; (train-test-index-split '(a b c d e f g h i j k l m) :test-size 0.3)
+;; (train-test-split *l* :test-size 0.3)
+
+
+(defun stratified-train-test-index-split (labels &key (test-size 0.3) (random-state *random-state*))
+  "Return split indexes (a much more memory saving method)."
+  (multiple-value-bind (split-indexes categories) (split-by-group-indexes labels)
+    (let* ((nshuffled-stratified-indexes (mapcar (lambda (x) (train-test-split
+							      (nshuffle x :random-state random-state)
+							      :test-size test-size
+							      :random-state random-state))
+					 split-indexes))
+      (train-indexes (alexandria:flatten (mapcar #'first nshuffled-stratified-indexes)))
+      (test-indexes  (alexandria:flatten (mapcar #'second nshuffled-stratified-indexes))))
+    (list train-indexes test-indexes categories test-size)))) ;; it works!!
+
+;; (stratified-train-test-index-split '(a a a b b b b b b c c c d d d d d d d d d) :test-size 0.4)
+      
+;; (defparameter *ls* '(a a a b b b b b b c c c d d d d d d d d d))
+;; (defparameter *ixs* (split-by-group-indexes *ls*))
+#| 
+(let ((split-indexes *ixs*)
+      (random-state *random-state*)
+      (test-size 0.34))
+(mapcar (lambda (x) (train-test-split
+                       (nshuffle x :random-state random-state)
+                       :test-size test-size
+                       :random-state random-state))
+        split-indexes))
+|#
+;; (stratified-train-test-index-split *ls* :test-size 0.4)
+
+
+(defun stratified-train-test-split (lol labels &key (test-size 0.3) (random-state *random-state*))
+  "Return data lol split in a stratified manner."
+  (destructuring-bind (train-indexes test-indexes categories tsize)
+      (stratified-train-test-index-split labels :test-size test-size :random-state random-state)
+    (flet ((select (idxs) (mapcar (lambda (i) (elt lol i)) idxs)))
+      (list (select train-indexes) (select test-indexes) train-indexes test-indexes categories tsize))))
+
+;; (stratified-train-test-split *ls* *ls* :test-size 0.4) ;; works!!
+
+;; arrays and reshape
+;; https://lispcookbook.github.io/cl-cookbook/arrays.html
+;; (ql:quickload :numcl)
+;; (in-package :numcl)
+;; https://github.com/numcl/numcl
+;; this is really good for reshaping around!
