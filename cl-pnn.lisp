@@ -199,6 +199,7 @@
 ;; and it would work much faster, if using vectors or arrays!
 
 
+#|
 
 (defparameter *data* (cl-csv:read-csv #P"/media/josephus/My Book/sc_atlas/data/atlas_data/atlas/e7_50_molecules_genes_transposed_r1000.tab" :separator #\Tab))
 (length *data*)
@@ -225,7 +226,7 @@
 
 (defparameter *test* (extract-rows-by-index (cdr *data*) (elt *train-indexes* 0))) ;; yes it extracts rows by a given index!
 
-
+|#
 
 
 
@@ -517,17 +518,32 @@
 ;; (train-test-split *l* :test-size 0.3)
 
 
-(defun stratified-train-test-index-split (labels &key (test-size 0.3) (random-state *random-state*))
+(defun stratified-train-test-index-split (labels &key (test-size 0.3) (random-state *random-state*) (verbose t))
   "Return split indexes (a much more memory saving method)."
   (multiple-value-bind (split-indexes categories) (split-by-group-indexes labels)
     (let* ((nshuffled-stratified-indexes (mapcar (lambda (x) (train-test-split
 							      (nshuffle x :random-state random-state)
 							      :test-size test-size
 							      :random-state random-state))
-					 split-indexes))
-      (train-indexes (alexandria:flatten (mapcar #'first nshuffled-stratified-indexes)))
-      (test-indexes  (alexandria:flatten (mapcar #'second nshuffled-stratified-indexes))))
-    (list train-indexes test-indexes categories test-size)))) ;; it works!!
+						 split-indexes))
+	   (train-indexes (alexandria:flatten (mapcar #'first nshuffled-stratified-indexes)))
+	   (test-indexes  (alexandria:flatten (mapcar #'second nshuffled-stratified-indexes))))
+      
+      (when verbose
+	(format t "Category counts:")
+	(loop for si in split-indexes
+	      for c in categories
+	      do (format t "~A#\tab: ~A~%" c (length si)))
+	#|
+	(format t "")
+	(format t "Too few members:")
+	(loop for si in split-indexes
+	      for c in categories
+	      when (< (* si test-size) 1)
+		do (format t "~A: ~A" c si)))
+          |#
+	)
+      (list train-indexes test-indexes categories test-size)))) ;; it works!!
 
 ;; (stratified-train-test-index-split '(a a a b b b b b b c c c d d d d d d d d d) :test-size 0.4)
       
@@ -561,3 +577,37 @@
 ;; (in-package :numcl)
 ;; https://github.com/numcl/numcl
 ;; this is really good for reshaping around!
+
+
+
+;; python text classification
+;; https://towardsdatascience.com/text-classification-in-python-dd95d264c802
+
+
+
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; test the big data
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defparameter *data* (cl-csv:read-csv #P"/media/josephus/My Book/sc_atlas/data/atlas_data/atlas/e7_50_molecules_genes_transposed_r1000.tab" :separator #\Tab))
+(length *data*)
+    
+(defparameter *t* (get-row *data* 10))
+
+(defparameter *anno* (cl-csv:read-csv #P"/media/josephus/My Book/sc_atlas/data/atlas_data/atlas/anno_e7_50.tab" :separator #\Tab))
+
+(defparameter *labels* (get-column-by-header-name *anno* "celltype" :one-correct-p t))
+
+(defparameter *labels-replaced* (replace-na *labels*))
+
+(multi-bind (*category-indexes* *categories*) (split-by-group-indexes *labels-replaced*))
+
+
+;; split data in a stratified manner
+
+(multi-bind (*train-indexes* *test-indexes* *categories* *test-size*)
+	    (stratified-train-test-index-split *labels-replaced* :test-size 0.1))
