@@ -9,6 +9,21 @@
 (setq *PRINT-PREC* 50)
 (defconstant +e+ (exp-r 1))
 
+;; (defun index-extract (lol index-list)
+;;   "Return subset of lol or l selected by index-list for rows."
+;;   (let ((index-list (sort (copy-seq index-list) #'<))) ;; sort has side effect on index-list! Thus copy!
+;;     (loop for i from 0 to (length lol)
+;; 	  when (member i index-list)
+;; 	    collect (progn
+;; 		      (setf index-list (cdr index-list))
+;; 		      (elt lol i))))) ;; this works!
+;; and it would work much faster, if using vectors or arrays!
+
+(defun index-extract (x index-list &key (exclude-nil-p t))
+  (mapcar (lambda (i) (elt x i)) (if exclude-nil-p
+				     (remove-if #'null index-list)
+				     index-list)))
+
 (defun unique (l &key (test #'string=))
   "Return unique list."
   (remove-duplicates l :from-end t :test test))
@@ -20,7 +35,7 @@
 	  for y in l2
 	  do (setf res (+r res (expt-r (-r x y) 2)))
 	  finally (return res))))
-  
+
 (defun gaussian-probability-density-function (l1 l2 sigma)
   "Return gaussian-probability-density-function of probe l1 and row l2."
   (/r (expt-r +e+ (-r (difference-square-sum l1 l2))) (*r 2 (expt-r sigma 2))))
@@ -75,12 +90,44 @@ Here not only feature reduction but also train-data reduction is needed!
 Actually the point is that one can randomly select - a minimal core of train datasets.
 They can be taken as seed and allt he remaining data will be added only if they improve the outcome.
 However, this is very validation dataset-dependent.
+
+The other possibility is to cluster the train data and see which data are similar
+and to remove same data points (or highly similar data points).
+
+Ah! or similar to xgboost or random-forest, one should build 
+small classifiers who are used in ensemble!!
 |#
 
+(defun remove-empty-string (string-list)
+  (remove-if (lambda (s) (string= "" s))
+	     string-list))
 
+(ql:quickload :cl-ppcre)
+(defun parse-whitespace-delimited-string (multiline-string)
+  "Return whitespace delimited multiline string as lol whitespace-only lines ignoring."
+  (mapcar (lambda (line)
+	    (read-from-string (concatenate 'string "(" line ")")))
+	  (remove-empty-string (cl-ppcre:split "\\n" multiline-string)))) ;;
 
+#|
+(defparameter *mydata*
+	   "
+row	length 	area 	label
+0 	0.5 	0.7 	BLUE
+1 	0.2 	0.5 	BLUE
+2 	0.8 	0.8 	RED
+3 	0.4 	0.5 	RED
+4 	0.8 	0.5 	GREEN
+5 	0.6 	0.3 	GREEN
+6 	0.3 	0.2 	GREEN
+")
 
+(defparameter *mydata* (parse-whitespace-delimited-string *mydata*))
 
+((ROW LENGTH AREA LABEL) (0 0.5 0.7 BLUE) (1 0.2 0.5 BLUE) (2 0.8 0.8 RED)
+ (3 0.4 0.5 RED) (4 0.8 0.5 GREEN) (5 0.6 0.3 GREEN) (6 0.3 0.2 GREEN))
+|#
+  
 (defun predict-single-probe-probabilities (x x-train y sigma)
   "Return probabilities for a single probe given train data."
   (multiple-value-bind (x-grouped names) (split-by-group x-train y)
@@ -129,9 +176,9 @@ However, this is very validation dataset-dependent.
   "Return class or probabilities of sample when running over x-train as PNN."
   (let ((sorted-probabilities (predict-single-probe-probabilities sample x-train y sigma)))
     (elt (elt sorted-probabilities 0) (if valuep 1 0))))
+  
 
-
-
+  
 
 ;; read tab delimited files
 ;; https://quickref.common-lisp.net/cl-csv.html#Introduction
@@ -200,7 +247,7 @@ However, this is very validation dataset-dependent.
 					 (setf (elt l x) 1)
 					 l))))
       (values one-hot-list categories))))
-
+  
 (defun one-hot-to-categories (one-hot-list categories)
   "Return categories from one-hot-encoded list."
   (labels ((choose (one-hot-row category-list)
@@ -236,15 +283,7 @@ However, this is very validation dataset-dependent.
 
 
 
-(defun index-extract (lol index-list)
-  "Return subset of lol or l selected by index-list for rows."
-  (let ((index-list (sort (copy-seq index-list) #'<))) ;; sort has side effect on index-list! Thus copy!
-    (loop for i from 0 to (length lol)
-	  when (member i index-list)
-	    collect (progn
-		      (setf index-list (cdr index-list))
-		      (elt lol i))))) ;; this works!
-;; and it would work much faster, if using vectors or arrays!
+
 
 
 #|
@@ -303,7 +342,7 @@ However, this is very validation dataset-dependent.
     (values y y-1h y-nums)))
 
 
-
+  
         
 
 
@@ -329,7 +368,7 @@ However, this is very validation dataset-dependent.
 
 ;; (defmacro single-assign (var value)
 ;;   `(defparameter ,var ,value))
-
+  
 ;; (macroexpand-1 (single-assign *b* 2))
 ;; (macroexpand-1 '(single-assign *c* 3))
 ;; (single-assign *c* 3) ;; works
@@ -390,7 +429,7 @@ However, this is very validation dataset-dependent.
 ;; (multi-assign (*a* *b* *c*) (10 11 12))  ;; this worked!
 ;; (macroexpand-1 '(multi-assign (*a* *b* *c*) (10 11 12)))
 ;; ;; => (PROGN (DEFPARAMETER *A* 10) (DEFPARAMETER *B* 11) (DEFPARAMETER *C* 12)), T
-
+  
 (defmacro multi-assign (vars values)
   `(progn ,@(loop for g in vars
 		  for v in values
@@ -505,7 +544,7 @@ However, this is very validation dataset-dependent.
 ;;      (DEFPARAMETER *E* #:G768)), T   ;; yes, that looks very correct!
 (multi-bind (*a* *b* *c* *d* *e*) (values 41 42 43 44 45)) ;; works!
 
-
+  
 
 
 
@@ -528,7 +567,7 @@ However, this is very validation dataset-dependent.
   (loop for i from (length sequence) downto 2
         do (rotatef (elt sequence (random i *random-state*))
                     (elt sequence (1- i))))
-  sequence) ;; rosettac code 
+  sequence) ;; rosettac code
 
 (defun split (list count)
   "split list by position count (count is length of first list)."
@@ -555,8 +594,35 @@ However, this is very validation dataset-dependent.
 (defun train-test-split (l &key (test-size 0.3) (random-state *random-state*))
   "Return lol split given list of list by ratio test-size."
   (let ((split-indexes (train-test-index-split l :test-size test-size :random-state random-state)))
-    (flet ((select (idxs) (mapcar (lambda (i) (elt l i)) idxs)))
-      (list (select (elt split-indexes 0)) (select (elt split-indexes 1))))))
+    (list (index-extract l (elt split-indexes 0))
+	  (index-extract l (elt split-indexes 1)))))
+
+(defun train-test-index-split-limited (l &key (test-size 0.3) (max-n 100) (random-state *random-state*))
+  "Return l split indexes given ratio-test-size and max train number."
+  (let* ((split-indexes (train-test-index-split l :test-size test-size :random-state random-state))
+	 (train-indexes (elt split-indexes 0))
+	 (test-indexes  (elt split-indexes 1))
+	 (len           (length train-indexes))
+	 (train-sel-indexes nil)
+	 (train-dumped-indexes nil))
+    (setf train-sel-indexes (if (> len max-n)
+				(subseq train-indexes 0 max-n)
+				train-indexes))
+    (setf train-dumped (if (> len max-n)
+			   (subseq train-indexes max-n len)
+			   ()))
+    (list train-sel-indexes train-dumped test-indexes)))
+
+(defun train-test-split-limited (l &key (test-size 0.3) (max-n 100) (random-state *random-state*))
+  "Return l split given ratio-test-size and max train number."
+  (let ((split-indexes (train-test-index-split-limited l
+						       :test-size test-size
+						       :max-n max-n
+						       :random-state random-state)))
+    (list (index-extract l (elt split-indexes 0))
+	  (index-extract l (elt split-indexes 1))
+	  (index-extract l (elt split-indexes 2)))))
+	
 
 ;; (defparameter *l* '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m"))
 ;; (length *l*)
@@ -574,6 +640,8 @@ However, this is very validation dataset-dependent.
 ;; (defparameter *indexes* (nshuffle *indexes*))
 ;; (defparameter *train-number* (- *length* *rfn*))
 ;; (split-list *indexes* *train-number*)
+
+;; (train-test-split-limited *l* :test-size 0.3 :max-n 5)
 
 (defun head (l &optional (n 5))
   (subseq l 0 n))
@@ -636,7 +704,7 @@ However, this is very validation dataset-dependent.
       (stratified-train-test-index-split labels :test-size test-size :random-state random-state)
     (flet ((select (idxs) (mapcar (lambda (i) (elt lol i)) idxs)))
       (list (select train-indexes) (select test-indexes) train-indexes test-indexes categories tsize))))
-
+  
 ;; (stratified-train-test-split *ls* *ls* :test-size 0.4) ;; works!!
 
 ;; arrays and reshape
@@ -646,11 +714,64 @@ However, this is very validation dataset-dependent.
 ;; https://github.com/numcl/numcl
 ;; this is really good for reshaping around!
 
-
-
 ;; python text classification
 ;; https://towardsdatascience.com/text-classification-in-python-dd95d264c802
 
+
+
+
+
+(defun stratified-train-test-index-split-limited (labels &key (test-size 0.3) (max-n 100) (random-state *random-state*) (verbose t))
+  "Return split indexes randomly selecting maximally max-n sample indexes 
+   (a much more memory saving method); limit for calculation saving."
+  (multiple-value-bind (split-indexes categories) (split-by-group-indexes labels)
+    (let* ((nshuffled-stratified-indexes (mapcar (lambda (x) (train-test-split-limited (nshuffle x :random-state random-state)
+										       :test-size test-size
+										       :max-n max-n
+										       :random-state random-state))
+						 split-indexes))
+	   (train-indexes (alexandria:flatten (mapcar #'first nshuffled-stratified-indexes)))
+	   (dumped-indexes  (alexandria:flatten (mapcar #'second nshuffled-stratified-indexes)))
+	   (test-indexes (alexandria:flatten (mapcar #'third nshuffled-stratified-indexes))))
+      (when verbose
+	(format t "Category counts:~%")
+	(loop for si in split-indexes
+	      for c in categories
+	      do (format t "~%~A~A: ~A" c #\Tab (length si)))
+	(format t "~%~%Only train no test (too few members):~%")
+	(loop for si in split-indexes
+	      for c in categories
+	      when (< (* (length si) test-size) 1)
+		do (format t "~%~A~A: ~A" c #\Tab (length si)))
+	(format t "~%~%Limits:~%")
+	(loop for nsi in nshuffled-stratified-indexes
+	      for c in categories
+	      when (not (zerop (length (cadr nsi))))
+		do (format t "~%Dumped ~A samples for ~A" (length (cadr nsi)) c)))
+      (list train-indexes dumped-indexes test-indexes categories test-size))))
+
+(defparameter *t3* '("a" "a" "a" "b" "b" "b" "b" "c" "c"))
+(stratified-train-test-index-split-limited '("a" "a" "a" "b" "b" "b" "b" "c" "c") :test-size (/ 1 3) :max-n 2)
+(multi-bind (*si* *c*) (split-by-group-indexes *t3*))
+(defparameter *test-size* (/ 1 3))
+(defparameter *nsi* (mapcar (lambda (x) (train-test-split-limited (nshuffle x :random-state *random-state*)
+								  :test-size *test-size*
+								  :max-n 2
+								  :random-state *random-state*))
+			    *si*))
+(defparameter *tis* (alexandria:flatten (mapcar #'first *nsi*)))
+(defparameter *dis* (alexandria:flatten (mapcar #'second *nsi*)))
+(defparameter *sis* (alexandria:flatten (mapcar #'third *nsi*)))
+
+
+
+
+
+
+
+
+
+  
 (defun string-to-number (s)
   "Return number from string."
   (with-input-from-string (in s)
@@ -710,3 +831,29 @@ However, this is very validation dataset-dependent.
 (difference-square-sum (elt *train-matrix* 0) (elt *test-matrix* 0))
 (gaussian-probability-density-function (elt *train-matrix* 0) (elt *test-matrix* 0) 1)
 (defparameter *t1* (gaussian-probability-density-function-matrix (elt *test-matrix* 0) *train-matrix* 1))
+
+
+;; split and limit data in stratified manner
+(defparameter *split-limited-result* (stratified-train-test-index-split-limited *labels-replaced* :test-size 0.3 :max-n 50))
+(defparameter *train-lim-indexes* (elt *split-limited-result* 0))
+(defparameter *test-lim-indexes* (elt *split-limited-result* 1))
+(defparameter *categories-lim* (elt *split-limited-result* 2))
+(defparameter *split-lim* (elt *split-limited-result* 3))
+
+(defparameter *train-lim-data* (index-extract (cdr *data*) *train-lim-indexes*))
+(defparameter *test-lim-data*  (index-extract (cdr *data*) *test-lim-indexes*))
+(defparameter *train-lim-labels* (index-extract *labels-replaced* *train-lim-indexes*))
+(defparameter *test-lim-labels* (index-extract *labels-replaced* *train-lim-indexes*))
+
+;; extract row names
+;; convert to numbers
+(defparameter *train-lim-row-names* (mapcar #'first *train-lim-data*))
+(defparameter *test-lim-row-names*  (mapcar #'first *test-lim-data*))
+
+(defparameter *train-lim-matrix* (numbers-extract *train-lim-data*))
+(defparameter *test-lim-matrix*  (numbers-extract *test-lim-data*))
+
+(difference-square-sum (elt *train-lim-matrix* 0) (elt *test-lim-matrix* 0))
+(gaussian-probability-density-function (elt *train-lim-matrix* 0) (elt *test-lim-matrix* 0) 1)
+(defparameter *t4* (gaussian-density (elt *test-lim-matrix* 0) (head *train-lim-matrix* 9) 1)
+(defparameter *t1* (gaussian-probability-density-function-matrix (elt *test-lim-matrix* 0) (head *train-lim-matrix* 9) 1))
