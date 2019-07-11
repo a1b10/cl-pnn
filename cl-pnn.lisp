@@ -2,6 +2,8 @@
 
 (in-package #:cl-pnn)
 
+(ql:quickload :alexandria)
+
 (ql:quickload :computable-reals)
 (use-package :computable-reals)
 (setq *PRINT-PREC* 50)
@@ -13,16 +15,17 @@
 
 (defun difference-square-sum (l1 l2)
   "Return sum of squared differences."
-  (loop for x in l1
-	for y in l2
-	sum (expt (-r x y) 2) into res
-	finally (return res)))
+  (let ((res 0))
+    (loop for x in l1
+	  for y in l2
+	  do (setf res (+r res (expt-r (-r x y) 2)))
+	  finally (return res))))
   
 (defun gaussian-probability-density-function (l1 l2 sigma)
   "Return gaussian-probability-density-function of probe l1 and row l2."
-  (/r (expt +e+ (- (difference-square-sum l1 l2))) (*r 2 (expt-r sigma 2))))
+  (/r (expt-r +e+ (-r (difference-square-sum l1 l2))) (*r 2 (expt-r sigma 2))))
 
-(defun dim (lol &key (contains-header-p t) (contains-row-names-p t))
+(defun dim (lol &optional (contains-row-names-p nil) (contains-header-p nil))
   "Return dimensions of a list of list or matrix."
   (values (if contains-header-p
               (1- (length lol))
@@ -33,13 +36,50 @@
 	  contains-header-p
 	  contains-row-names-p))
 
-(defun gaussian-probability-density-function-matrix (l1 x-train sigma)
+(defun gaussian-probability-density-function-matrix (l1 x-train sigma &key (contains-row-names-p nil) (contains-header-p nil))
   "Return probability value for a sample and matrix of train values."
-  (multiple-value-bind (m p) (dim x-train)
-    (let ((expression (*r m (/r 1 (*r (expt (*r 2 pi) (/r p 2)) (expt sigma p))))))
+  (multiple-value-bind (m p) (dim x-train contains-row-names-p contains-header-p)
+    (let ((expression (*r m (/r 1 (*r (expt-r (*r 2 +pi-r+) (/r p 2)) (expt-r sigma p))))))
       (/r 1 (*r expression
 		(mapcar #'(lambda (l2) (gaussian-probability-density-function l1 l2 sigma))
 			x-train))))))
+
+;; new approach
+
+(defun sum-r (l)
+  (reduce #'+r l))
+
+(defun gaussian-exponent (l1 l2 sigma)
+  (expt-r +e+ (/r (difference-square-sum l1 l2) (*r 2 (expt-r sigma 2)))))
+
+(defun gaussian-density (l1 x-train sigma)
+  "density function using gaussian distribution after ch1_3-ch1_3.pdf"
+  (multiple-value-bind (m p) (dim x-train)
+    (let* ((coefficient (/r 1 (*r (expt-r (*r 2 +pi-r+) (/r p 2)) m))))
+      (*r coefficient (sum-r (mapcar (lambda (l2) (gaussian-exponent l1 l2 sigma))
+				     x-train))))))
+
+(defparameter *l1* (elt *test-matrix* 0))
+(defparameter *x-train* *train-matrix*)
+(defparameter *sigma* 1)
+(multi-bind (*m* *p*) (dim *x-train* nil nil))
+(defparameter *expr* (*r *m* (/r 1 (*r (expt-r (*r 2 +pi-r+) (/r *p* 2)) (expt-r *sigma* *p*)))))
+(defparameter *t2* (gaussian-density *l1* *x-train* *sigma*)) ;; takes quite long!
+
+#|
+The question would be by which strategy to reduce (prune) the train-data set
+without any information loss.
+
+Here not only feature reduction but also train-data reduction is needed!
+
+Actually the point is that one can randomly select - a minimal core of train datasets.
+They can be taken as seed and allt he remaining data will be added only if they improve the outcome.
+However, this is very validation dataset-dependent.
+|#
+
+
+
+
 
 (defun predict-single-probe-probabilities (x x-train y sigma)
   "Return probabilities for a single probe given train data."
@@ -93,8 +133,6 @@
 
 
 
-
-
 ;; read tab delimited files
 ;; https://quickref.common-lisp.net/cl-csv.html#Introduction
 
@@ -119,7 +157,17 @@
 	 (col-idx  (position col-name colnames :test #'string=)))
     (extract-column-by-position (cdr matrix) (1+ col-idx))))
 
+;; PNN brain image 100-80-73
+;; http://www.rroij.com/open-access/probabilistic-neural-network-forbrain-tumor-classification.php?aid=41337
 
+;; pnn mathworks https://de.mathworks.com/help/deeplearning/ug/probabilistic-neural-networks.html
+
+
+;; keras ensembl with softmax https://towardsdatascience.com/the-softmax-function-neural-net-outputs-as-probabilities-and-ensemble-classifiers-9bd94d75932
+
+
+;; PNN with complex exponential activation function image recognition
+;; https://arxiv.org/pdf/1708.02733.pdf
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -188,8 +236,8 @@
 
 
 
-(defun extract-rows-by-index (lol index-list)
-  "Return subset of lol selected by index-list for rows."
+(defun index-extract (lol index-list)
+  "Return subset of lol or l selected by index-list for rows."
   (let ((index-list (sort (copy-seq index-list) #'<))) ;; sort has side effect on index-list! Thus copy!
     (loop for i from 0 to (length lol)
 	  when (member i index-list)
@@ -224,7 +272,7 @@
   (defparameter *train-indexes* list-of-indexes)
   (defparameter *categories* categories))
 
-(defparameter *test* (extract-rows-by-index (cdr *data*) (elt *train-indexes* 0))) ;; yes it extracts rows by a given index!
+(defparameter *test* (index-extract (cdr *data*) (elt *train-indexes* 0))) ;; yes it extracts rows by a given index!
 
 |#
 
@@ -254,7 +302,7 @@
 	 (y-nums (categorical-to-nums y)))
     (values y y-1h y-nums)))
 
-(ql:quickload :alexandria)
+
 
         
 
@@ -484,7 +532,8 @@
 
 (defun split (list count)
   "split list by position count (count is length of first list)."
-  (values (subseq list 0 count) (subseq list count)))
+  (let ((count (round count)))
+    (values (subseq list 0 count) (subseq list count))))
 
 (defun split-list (list count)
   "Return lol with inner list being split by psoition count."
@@ -498,7 +547,7 @@
 			collect i)))
     (if (or (> 1 ratio-full-number) (not (integer-like-p ratio-full-number)))
       (setf ratio-full-number (floor ratio-full-number))
-      (format t "Not even divider. Using next lower number:~A" ratio-full-number))
+      (format t "~%Not even divider. Using next lower number:~A" ratio-full-number))
     (let ((indexes (nshuffle indexes :random-state random-state))
 	  (train-number (- length ratio-full-number)))
       (split-list indexes train-number)))) ;; works
@@ -509,7 +558,7 @@
     (flet ((select (idxs) (mapcar (lambda (i) (elt l i)) idxs)))
       (list (select (elt split-indexes 0)) (select (elt split-indexes 1))))))
 
-;; (defparameter *l* '(a b c d e f g h i j k l m))
+;; (defparameter *l* '("a" "b" "c" "d" "e" "f" "g" "h" "i" "j" "k" "l" "m"))
 ;; (length *l*)
 ;; (* 0.3 13) ;; 3.9
 ;; (loop for i from 0 to 13 collect i)
@@ -517,6 +566,21 @@
 ;; (train-test-index-split '(a b c d e f g h i j k l m) :test-size 0.3)
 ;; (train-test-split *l* :test-size 0.3)
 
+;; (defparameter *length* (length *lr*))
+;; (defparameter *rfn* (* 0.3 *length*))
+;; (defparameter *indexes* (loop for i from 0 below *length* collect i))
+;; (> 1 *rfn*) ;; nil
+;; (integer-like-p *rfn*) ;; T -> null
+;; (defparameter *indexes* (nshuffle *indexes*))
+;; (defparameter *train-number* (- *length* *rfn*))
+;; (split-list *indexes* *train-number*)
+
+(defun head (l &optional (n 5))
+  (subseq l 0 n))
+
+(defun tail (l &optional (n 5))
+  (let ((len (length l)))
+    (subseq l (- len n) len)))
 
 (defun stratified-train-test-index-split (labels &key (test-size 0.3) (random-state *random-state*) (verbose t))
   "Return split indexes (a much more memory saving method)."
@@ -530,24 +594,24 @@
 	   (test-indexes  (alexandria:flatten (mapcar #'second nshuffled-stratified-indexes))))
       
       (when verbose
-	(format t "Category counts:")
+	(format t "Category counts:~%")
 	(loop for si in split-indexes
 	      for c in categories
-	      do (format t "~A#\tab: ~A~%" c (length si)))
-	#|
-	(format t "")
-	(format t "Too few members:")
+	      do (format t "~%~A~A: ~A" c #\Tab (length si)))
+	(format t "~%~%Only train no test (too few members):~%")
 	(loop for si in split-indexes
 	      for c in categories
-	      when (< (* si test-size) 1)
-		do (format t "~A: ~A" c si)))
-          |#
-	)
+	      when (< (* (length si) test-size) 1)
+		do (format t "~%~A~A: ~A" c #\Tab (length si))))
       (list train-indexes test-indexes categories test-size)))) ;; it works!!
+
+;; (multi-bind (*t1* *cat*) (split-by-group-indexes *labels-replaced*))
+;; (defparameter *t2* (mapcar (lambda (x) (train-test-split (nshuffle x) :test-size 0.3)) *t1*))
 
 ;; (stratified-train-test-index-split '(a a a b b b b b b c c c d d d d d d d d d) :test-size 0.4)
       
 ;; (defparameter *ls* '(a a a b b b b b b c c c d d d d d d d d d))
+;; (defparameter *ls* (mapcar #'string *ls*))
 ;; (defparameter *ixs* (split-by-group-indexes *ls*))
 #| 
 (let ((split-indexes *ixs*)
@@ -559,7 +623,11 @@
                        :random-state random-state))
         split-indexes))
 |#
-;; (stratified-train-test-index-split *ls* :test-size 0.4)
+;; (stratified-train-test-index-split *ls* :test-size 0.3)
+
+;; (defparameter *lr* (head *labels-replaced* 1000))
+;; (stratified-train-test-index-split *lr* :test-size 0.3)
+;; (untrace stratified-train-test-index-split)
 
 
 (defun stratified-train-test-split (lol labels &key (test-size 0.3) (random-state *random-state*))
@@ -583,9 +651,17 @@
 ;; python text classification
 ;; https://towardsdatascience.com/text-classification-in-python-dd95d264c802
 
+(defun string-to-number (s)
+  "Return number from string."
+  (with-input-from-string (in s)
+    (read in)))
 
-
-
+(defun numbers-extract (train-test-data)
+  "Return numeric lol from train-data or test-data."
+  (mapcar (lambda (row)
+	    (mapcar #'string-to-number
+		    (cdr row)))
+	  train-test-data))
 
 
 
@@ -604,10 +680,33 @@
 
 (defparameter *labels-replaced* (replace-na *labels*))
 
-(multi-bind (*category-indexes* *categories*) (split-by-group-indexes *labels-replaced*))
+(defparameter *result* (split-by-group-indexes *labels-replaced*))
 
 
 ;; split data in a stratified manner
 
-(multi-bind (*train-indexes* *test-indexes* *categories* *test-size*)
-	    (stratified-train-test-index-split *labels-replaced* :test-size 0.1))
+(defparameter *split-result* (stratified-train-test-index-split *labels-replaced* :test-size 0.1))
+(defparameter *train-indexes* (elt *split-result* 0))
+(defparameter *test-indexes* (elt *split-result* 1))
+(defparameter *categories* (elt *split-result* 2))
+(defparameter *split* (elt *split-result* 3))
+(length *split-result*)
+
+;; extract train test data
+
+(defparameter *train-data* (index-extract (cdr *data*) *train-indexes*))
+(defparameter *test-data*  (index-extract (cdr *data*) *test-indexes*))
+(defparameter *train-labels* (index-extract *labels-replaced* *train-indexes*))
+(defparameter *test-labels* (index-extract *labels-replaced* *train-indexes*))
+
+;; extract row names
+;; convert to numbers
+(defparameter *train-row-names* (mapcar #'first *train-data*))
+(defparameter *test-row-names*  (mapcar #'first *test-data*))
+
+(defparameter *train-matrix* (numbers-extract *train-data*))
+(defparameter *test-matrix*  (numbers-extract *test-data*))
+
+(difference-square-sum (elt *train-matrix* 0) (elt *test-matrix* 0))
+(gaussian-probability-density-function (elt *train-matrix* 0) (elt *test-matrix* 0) 1)
+(defparameter *t1* (gaussian-probability-density-function-matrix (elt *test-matrix* 0) *train-matrix* 1))
