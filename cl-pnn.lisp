@@ -12,8 +12,9 @@
 
 ;; (ql:quickload :computable-reals)
 ;; (use-package :computable-reals)
+;; ;; https://quickref.common-lisp.net/computable-reals.html#Exported-functions
 
-(setq *PRINT-PREC* 50)
+(setq *PRINT-PREC* 1600)
 (defconstant +e+ (exp-r 1))
 
 (defun head (l &optional (n 5))
@@ -23,10 +24,17 @@
   (let ((len (length l)))
     (subseq l (- len n) len)))
 
+(defun table-head (lol &optional (n 6))
+  (let ((rows (head lol n)))
+    (mapcar (lambda (row) (head row n)) rows)))
+
 (defun index-extract (x index-list &key (exclude-nil-p t))
   (mapcar (lambda (i) (elt x i)) (if exclude-nil-p
 				     (remove-if #'null index-list)
 				     index-list)))
+
+(defun zip (&rest lists)
+  (apply #'mapcar #'list lists))
 
 (defun unique (l &key (test #'string=))
   "Return unique list."
@@ -42,8 +50,12 @@
 		   (length (elt lol 0)))))
     (values nrows ncols contains-header-p contains-row-names-p)))
 
+(defun to-number (x)
+  "Return number from x."
+  (cond ((typep x 'number) x)
+	((typep x 'string) (string-to-number x))
+	(t x)))
 
-  
 (defun string-to-number (s)
   "Return number from string."
   (with-input-from-string (in s)
@@ -52,7 +64,7 @@
 (defun numbers-extract (train-test-data)
   "Return numeric lol from train-data or test-data."
   (mapcar (lambda (row)
-	    (mapcar #'string-to-number
+	    (mapcar #'to-number
 		    (cdr row)))
 	  train-test-data))
 
@@ -100,6 +112,39 @@
     (values y y-1h y-nums)))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; normalization tpm
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun norm-list-r (l)
+  (let ((total (reduce #'+r l)))
+    (mapcar (lambda (x) (if (zerop total)
+			    0
+			    (/r x total)))
+	    l)))
+
+(defun transpose (matrix)
+  (apply #'mapcar #'list matrix))
+
+(defun tpm-pseudo-r (train-matrix &optional (col-totals nil))
+  "The pseudo-tpm (pseudo because without the per million
+   and without the gene-length correction).
+   First normalize feature-wise, then by sequence-depth (row-wise)."
+  (let* ((cols     (transpose train-matrix))
+	 (col-totals (or col-totals
+			 (mapcar (lambda (col) (reduce #'+r col))
+				 cols)))
+	 (cols-normed (mapcar (lambda (col total)
+				(mapcar (lambda (x) (if (zerop total)
+							0
+							(/r x total)))
+					col))
+			       cols col-totals))
+	 (rows     (transpose cols-normed))
+	 (cols-rows-normed (mapcar #'norm-list-r rows)))
+    (values cols-rows-normed
+	    col-totals))) ;; col-totals needed for later 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; read tab delimited files
 ;; https://quickref.common-lisp.net/cl-csv.html#Introduction
@@ -122,9 +167,6 @@
   (let* ((colnames (elt matrix 0))
 	 (col-idx  (position col-name colnames :test #'string=)))
     (extract-column-by-position (cdr matrix) (1+ col-idx))))
-
-
-
 
 (defun gaussian-probability-density-function (l1 l2 sigma)
   "Return gaussian-probability-density-function of probe l1 and row l2."
@@ -149,9 +191,9 @@
 (defun gaussian-density (l1 x-train sigma)
   "density function using gaussian distribution after ch1_3-ch1_3.pdf"
   (multiple-value-bind (m p) (dim x-train)
-    (let* ((coefficient (/r 1 (*r (expt-r (*r 2 +pi-r+) (/r p 2)) m))))
-      (*r coefficient (sum-r (mapcar (lambda (l2) (gaussian-exponent l1 l2 sigma))
-				     x-train))))))
+    (let* ((coefficient (/r 1 (*r (expt-r (*r 2 +pi-r+) (/r p 2)) m (expt-r sigma p)))))
+      (sum-r (mapcar (lambda (l2) (*r coefficient (gaussian-exponent l1 l2 sigma)))
+		     x-train)))))
 
 
 (defun predict-single-probe-probabilities (x x-train y sigma)
@@ -260,6 +302,17 @@
 		for v in `,inner-vars
 		collect `(defparameter ,g ,v)))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; multi-bind-destructuring macro
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defmacro multi-bind-destructuring (global-vars multi-value-expression)
+  (let ((inner-vars (loop for _ in `,global-vars collect (gensym))))
+     `(destructuring-bind ,inner-vars ,multi-value-expression
+	,@(loop for g in `,global-vars
+		for v in `,inner-vars
+		collect `(defparameter ,g ,v))))) ;; works!
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; improved train test split
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -297,8 +350,12 @@
 	 (indexes (loop for i from 0 below length
 			collect i)))
     (if (or (> 1 ratio-full-number) (not (integer-like-p ratio-full-number)))
-      (setf ratio-full-number (floor ratio-full-number))
-      (format t "~%Not even divider. Using next lower number:~A" ratio-full-number))
+	(setf ratio-full-number (floor ratio-full-number))
+	(format t "~%Not even divider. Using next lower number: ~A ~A Rest: ~A"
+		ratio-full-number
+		#\Tab
+		(- (* test-size length)
+		   ratio-full-number)))
     (let ((indexes (nshuffle indexes :random-state random-state))
 	  (train-number (- length ratio-full-number)))
       (split-list indexes train-number)))) ;; works
@@ -347,7 +404,7 @@
 	   (test-indexes  (alexandria:flatten (mapcar #'second nshuffled-stratified-indexes))))
       
       (when verbose
-	(format t "Category counts:~%")
+	(format t "~%~%~%Category counts:~%")
 	(loop for si in split-indexes
 	      for c in categories
 	      do (format t "~%~A~A: ~A" c #\Tab (length si)))
@@ -378,7 +435,7 @@
 	   (dumped-indexes  (alexandria:flatten (mapcar #'second nshuffled-stratified-indexes)))
 	   (test-indexes (alexandria:flatten (mapcar #'third nshuffled-stratified-indexes))))
       (when verbose
-	(format t "Category counts:~%")
+	(format t "~%~%~%Category counts:~%")
 	(loop for si in split-indexes
 	      for c in categories
 	      do (format t "~%~A~A: ~A" c #\Tab (length si)))
@@ -392,4 +449,58 @@
 	      for c in categories
 	      when (not (zerop (length (cadr nsi))))
 		do (format t "~%Dumped ~A samples for ~A" (length (cadr nsi)) c)))
-      (list train-indexes dumped-indexes test-indexes categories test-size))))
+      (list train-indexes dumped-indexes test-indexes categories test-size max-n))))
+
+(defun remove-header-row-names (mat)
+  (let* ((row-names (cdr (mapcar #'first mat)))
+         (header    (elt mat 0))
+         (matrix    (mapcar #'cdr (cdr mat))))
+    (values matrix header row-names)))
+
+(defun general-stratified-train-test-split-indexes (labels &key (test-size 0.3)
+						     (max-n nil)
+						     (random-state *random-state*)
+						     (verbose t))
+  "Returns splitted matrices indexes (train test), test-size, max-n,
+   train-test-header train-rownames, test-rownames."
+  ;; split indexes
+  (if max-n
+      (destructuring-bind (train-indexes dumped-indexes test-indexes categories test-size max-n)
+	  (stratified-train-test-index-split-limited labels :test-size test-size :max-n max-n :random-state random-state :verbose verbose)
+	(list train-indexes test-indexes categories test-size dumped-indexes max-n))
+      (destructuring-bind (train-indexes test-indexes categories test-size)
+	  (stratified-train-test-index-split labels :test-size test-size :random-state random-state :verbose verbose)
+	(let ((dumped-indexes))
+	  (list train-indexes test-indexes categories test-size dumped-indexes max-n))))) ;; not yet tested
+
+(defun general-stratified-train-test-split-from-named-matrix (named-matrix labels &key (test-size 0.3)
+										    (max-n nil)
+										    (random-state *random-state*)
+										    (verbose t))
+  ;; split indexes
+  (destructuring-bind (train-indexes test-indexes categories split dumped-indexes max-n)
+      (general-stratified-train-test-split-indexes labels :test-size test-size :max-n max-n :random-state random-state :verbose verbose)
+    (let* ((train-data (index-extract (cdr named-matrix) train-indexes))
+	   (test-data  (index-extract (cdr named-matrix) test-indexes))
+	   (train-labels (index-extract labels train-indexes))
+	   (test-labels (index-extract labels test-indexes))
+	   (train-row-names (mapcar #'first train-data))
+	   (test-row-names  (mapcar #'first test-data))
+	   (header (elt named-matrix 0))
+	   (train-matrix (numbers-extract train-data))
+	   (test-matrix  (numbers-extract test-data)))
+      (list train-matrix test-matrix train-labels test-labels
+	    train-indexes test-indexes dumped-indexes
+	    categories
+	    split max-n
+	    train-row-names test-row-names header)))) ;; not yet tested
+
+;; there should be a normalization version which in addition normalizes correctly
+;; these lists which are returned demand objects or structs which bear the information inside them,
+;; without having to care about implementation details (the order of the 'slots').
+
+
+;; automation is comparably easy in common-lisp!
+
+;; how to get the PNN to work is the big question for me.
+
