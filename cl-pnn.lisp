@@ -499,7 +499,6 @@
 ;; these lists which are returned demand objects or structs which bear the information inside them,
 ;; without having to care about implementation details (the order of the 'slots').
 
-
 ;; automation is comparably easy in common-lisp!
 
 ;; how to get the PNN to work is the big question for me.
